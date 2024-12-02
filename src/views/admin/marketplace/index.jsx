@@ -1,305 +1,332 @@
-/*!
-  _   _  ___  ____  ___ ________  _   _   _   _ ___   
- | | | |/ _ \|  _ \|_ _|__  / _ \| \ | | | | | |_ _| 
- | |_| | | | | |_) || |  / / | | |  \| | | | | || | 
- |  _  | |_| |  _ < | | / /| |_| | |\  | | |_| || |
- |_| |_|\___/|_| \_\___/____\___/|_| \_|  \___/|___|
-                                                                                                                                                                                                                                                                                                                                       
-=========================================================
-* Horizon UI - v1.1.0
-=========================================================
-
-* Product Page: https://www.horizon-ui.com/
-* Copyright 2023 Horizon UI (https://www.horizon-ui.com/)
-
-* Designed and Coded by Simmmple
-
-=========================================================
-
-* The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-*/
-
-import React from "react";
-
-// Chakra imports
+import React, { useState } from "react";
 import {
   Box,
   Button,
   Flex,
   Grid,
-  Link,
   Text,
+  Input,
+  Textarea,
+  FormLabel,
+  Select,
   useColorModeValue,
   SimpleGrid,
 } from "@chakra-ui/react";
+import { db, storage } from "../../../firebase/firebase"; // Adjust path as necessary
+import { collection, addDoc, updateDoc, doc } from "firebase/firestore"; // Firestore functions
+import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage"; // Firebase Storage functions
 
-// Custom components
-import Banner from "views/admin/marketplace/components/Banner";
-import TableTopCreators from "views/admin/marketplace/components/TableTopCreators";
-import HistoryItem from "views/admin/marketplace/components/HistoryItem";
-import NFT from "components/card/NFT";
-import Card from "components/card/Card.js";
+export default function EventPostPage() {
+  const [eventDetails, setEventDetails] = useState({
+    image: null, // Image file object
+    title: "",
+    location: "",
+    description: "",
+    time: "",
+    date: "",
+    ticketCategory: "Early Bird", // Default ticket category
+    category: "", // Event category (e.g., Music, Sports, etc.)
+    tickets: [
+      { category: "Early Bird", price: "" },
+      { category: "Regular", price: "" },
+      { category: "VIP", price: "" },
+      { category: "VVIP", price: "" },
+    ], // Default ticket categories
+  });
 
-// Assets
-import Nft1 from "assets/img/nfts/Nft1.png";
-import Nft2 from "assets/img/nfts/Nft2.png";
-import Nft3 from "assets/img/nfts/Nft3.png";
-import Nft4 from "assets/img/nfts/Nft4.png";
-import Nft5 from "assets/img/nfts/Nft5.png";
-import Nft6 from "assets/img/nfts/Nft6.png";
-import Avatar1 from "assets/img/avatars/avatar1.png";
-import Avatar2 from "assets/img/avatars/avatar2.png";
-import Avatar3 from "assets/img/avatars/avatar3.png";
-import Avatar4 from "assets/img/avatars/avatar4.png";
-import tableDataTopCreators from "views/admin/marketplace/variables/tableDataTopCreators.json";
-import { tableColumnsTopCreators } from "views/admin/marketplace/variables/tableColumnsTopCreators";
+  const [loading, setLoading] = useState(false); // For tracking loading state while uploading
+  const [progress, setProgress] = useState(0); // Track upload progress
 
-export default function Marketplace() {
   // Chakra Color Mode
   const textColor = useColorModeValue("secondaryGray.900", "white");
-  const textColorBrand = useColorModeValue("brand.500", "white");
+  const boxShadow = useColorModeValue("lg", "dark-lg");
+  const inputBgColor = useColorModeValue("white", "gray.800");
+  const inputBorderColor = useColorModeValue("gray.300", "gray.600");
+  const formLabelColor = useColorModeValue("gray.700", "gray.300");
+
+  // Handle input change for fields like title, description, etc.
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setEventDetails((prevDetails) => ({
+      ...prevDetails,
+      [name]: value,
+    }));
+  };
+
+  // Handle change for ticket prices
+  const handleTicketChange = (index, e) => {
+    const { name, value } = e.target;
+    const newTickets = [...eventDetails.tickets];
+    newTickets[index][name] = value;
+    setEventDetails((prevDetails) => ({
+      ...prevDetails,
+      tickets: newTickets,
+    }));
+  };
+
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setEventDetails({ ...eventDetails, image: file });
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!eventDetails.title || !eventDetails.location || !eventDetails.date || !eventDetails.time) {
+      alert("Please fill in all required fields.");
+      return;
+    }
+
+    try {
+      setLoading(true); // Start loading
+      console.log("Starting event posting...");
+
+      
+      const eventCollectionRef = collection(db, "events");
+      const docRef = await addDoc(eventCollectionRef, {
+        title: eventDetails.title,
+        location: eventDetails.location,
+        description: eventDetails.description,
+        time: eventDetails.time,
+        date: eventDetails.date,
+        ticketCategory: eventDetails.ticketCategory,
+        category: eventDetails.category,
+        tickets: eventDetails.tickets,
+        imageUrl: "", 
+        createdAt: new Date(),
+      });
+
+      console.log("Event added with ID:", docRef.id);
+
+      
+      let imageUrl = "";
+      if (eventDetails.image) {
+        console.log("Uploading image...");
+
+        const imageRef = ref(storage, `events/${eventDetails.image.name}`);
+        const uploadTask = uploadBytesResumable(imageRef, eventDetails.image);
+
+        // Monitor upload progress
+        uploadTask.on(
+          "state_changed",
+          (snapshot) => {
+            const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+            setProgress(progress); // Update progress state
+            console.log(`Upload progress: ${progress}%`);
+          },
+          (error) => {
+            console.error("Error uploading image:", error);
+            alert(`Error uploading image: ${error.message}`);
+          },
+          async () => {
+            // Once the upload is complete, get the image URL
+            imageUrl = await getDownloadURL(uploadTask.snapshot.ref());
+            console.log("Image uploaded successfully:", imageUrl);
+
+            // Step 3: Update the Firestore document with the image URL
+            await updateDoc(doc(db, "events", docRef.id), {
+              imageUrl: imageUrl, // Update with image URL
+            });
+
+            console.log("Image uploaded and Firestore updated!");
+          }
+        );
+
+        // Wait for the image upload to complete
+        await uploadTask;
+        console.log("Image upload task completed");
+      }
+
+      alert("Event posted successfully!");
+      setProgress(0); // Reset progress bar
+      setEventDetails({
+        image: null,
+        title: "",
+        location: "",
+        description: "",
+        time: "",
+        date: "",
+        ticketCategory: "Early Bird",
+        category: "",
+        tickets: [
+          { category: "Early Bird", price: "" },
+          { category: "Regular", price: "" },
+          { category: "VIP", price: "" },
+          { category: "VVIP", price: "" },
+        ],
+      });
+
+    } catch (error) {
+      console.error("Error posting event:", error);
+      alert(`Error posting event: ${error.message}`);
+    } finally {
+      setLoading(false); // Stop loading after completing
+      console.log("Loading state set to false");
+    }
+  };
+
   return (
     <Box pt={{ base: "180px", md: "80px", xl: "80px" }}>
-      {/* Main Fields */}
-      <Grid
-        mb='20px'
-        gridTemplateColumns={{ xl: "repeat(3, 1fr)", "2xl": "1fr 0.46fr" }}
-        gap={{ base: "20px", xl: "20px" }}
-        display={{ base: "block", xl: "grid" }}>
-        <Flex
-          flexDirection='column'
-          gridArea={{ xl: "1 / 1 / 2 / 3", "2xl": "1 / 1 / 2 / 2" }}>
-          <Banner />
-          <Flex direction='column'>
-            <Flex
-              mt='45px'
-              mb='20px'
-              justifyContent='space-between'
-              direction={{ base: "column", md: "row" }}
-              align={{ base: "start", md: "center" }}>
-              <Text color={textColor} fontSize='2xl' ms='24px' fontWeight='700'>
-                Trending NFTs
-              </Text>
-              <Flex
-                align='center'
-                me='20px'
-                ms={{ base: "24px", md: "0px" }}
-                mt={{ base: "20px", md: "0px" }}>
-                <Link
-                  color={textColorBrand}
-                  fontWeight='500'
-                  me={{ base: "34px", md: "44px" }}
-                  to='#art'>
-                  Art
-                </Link>
-                <Link
-                  color={textColorBrand}
-                  fontWeight='500'
-                  me={{ base: "34px", md: "44px" }}
-                  to='#music'>
-                  Music
-                </Link>
-                <Link
-                  color={textColorBrand}
-                  fontWeight='500'
-                  me={{ base: "34px", md: "44px" }}
-                  to='#collectibles'>
-                  Collectibles
-                </Link>
-                <Link color={textColorBrand} fontWeight='500' to='#sports'>
-                  Sports
-                </Link>
-              </Flex>
-            </Flex>
-            <SimpleGrid columns={{ base: 1, md: 3 }} gap='20px'>
-              <NFT
-                name='Abstract Colors'
-                author='By Esthera Jackson'
-                bidders={[
-                  Avatar1,
-                  Avatar2,
-                  Avatar3,
-                  Avatar4,
-                  Avatar1,
-                  Avatar1,
-                  Avatar1,
-                  Avatar1,
-                ]}
-                image={Nft1}
-                currentbid='0.91 ETH'
-                download='#'
+      <Grid mb="20px" templateColumns={{ base: "1fr", lg: "1fr 1fr" }} gap={{ base: "20px", xl: "20px" }}>
+        {/* Left Section: Input Form */}
+        <Flex flexDirection="column">
+          <Text color={textColor} fontSize="2xl" fontWeight="700" mb="24px">
+            Post New Event
+          </Text>
+
+          {/* Event Fields */}
+          <FormLabel htmlFor="image" color={formLabelColor}>
+            Image
+          </FormLabel>
+          <Input
+            type="file"
+            id="image"
+            name="image"
+            onChange={handleImageChange}
+            mb="20px"
+            bg={inputBgColor}
+            borderColor={inputBorderColor}
+          />
+
+          <SimpleGrid columns={{ base: 1, md: 2 }} spacing={5}>
+            <Flex direction="column">
+              <FormLabel htmlFor="title" color={formLabelColor}>
+                Title
+              </FormLabel>
+              <Input
+                id="title"
+                name="title"
+                value={eventDetails.title}
+                onChange={handleInputChange}
+                mb="20px"
+                placeholder="Enter event title"
+                bg={inputBgColor}
+                borderColor={inputBorderColor}
               />
-              <NFT
-                name='ETH AI Brain'
-                author='By Nick Wilson'
-                bidders={[
-                  Avatar1,
-                  Avatar2,
-                  Avatar3,
-                  Avatar4,
-                  Avatar1,
-                  Avatar1,
-                  Avatar1,
-                  Avatar1,
-                ]}
-                image={Nft2}
-                currentbid='0.91 ETH'
-                download='#'
-              />
-              <NFT
-                name='Mesh Gradients '
-                author='By Will Smith'
-                bidders={[
-                  Avatar1,
-                  Avatar2,
-                  Avatar3,
-                  Avatar4,
-                  Avatar1,
-                  Avatar1,
-                  Avatar1,
-                  Avatar1,
-                ]}
-                image={Nft3}
-                currentbid='0.91 ETH'
-                download='#'
-              />
-            </SimpleGrid>
-            <Text
-              mt='45px'
-              mb='36px'
-              color={textColor}
-              fontSize='2xl'
-              ms='24px'
-              fontWeight='700'>
-              Recently Added
-            </Text>
-            <SimpleGrid
-              columns={{ base: 1, md: 3 }}
-              gap='20px'
-              mb={{ base: "20px", xl: "0px" }}>
-              <NFT
-                name='Swipe Circles'
-                author='By Peter Will'
-                bidders={[
-                  Avatar1,
-                  Avatar2,
-                  Avatar3,
-                  Avatar4,
-                  Avatar1,
-                  Avatar1,
-                  Avatar1,
-                  Avatar1,
-                ]}
-                image={Nft4}
-                currentbid='0.91 ETH'
-                download='#'
-              />
-              <NFT
-                name='Colorful Heaven'
-                author='By Mark Benjamin'
-                bidders={[
-                  Avatar1,
-                  Avatar2,
-                  Avatar3,
-                  Avatar4,
-                  Avatar1,
-                  Avatar1,
-                  Avatar1,
-                  Avatar1,
-                ]}
-                image={Nft5}
-                currentbid='0.91 ETH'
-                download='#'
-              />
-              <NFT
-                name='3D Cubes Art'
-                author='By Manny Gates'
-                bidders={[
-                  Avatar1,
-                  Avatar2,
-                  Avatar3,
-                  Avatar4,
-                  Avatar1,
-                  Avatar1,
-                  Avatar1,
-                  Avatar1,
-                ]}
-                image={Nft6}
-                currentbid='0.91 ETH'
-                download='#'
-              />
-            </SimpleGrid>
-          </Flex>
-        </Flex>
-        <Flex
-          flexDirection='column'
-          gridArea={{ xl: "1 / 3 / 2 / 4", "2xl": "1 / 2 / 2 / 3" }}>
-          <Card px='0px' mb='20px'>
-            <TableTopCreators
-              tableData={tableDataTopCreators}
-              columnsData={tableColumnsTopCreators}
-            />
-          </Card>
-          <Card p='0px'>
-            <Flex
-              align={{ sm: "flex-start", lg: "center" }}
-              justify='space-between'
-              w='100%'
-              px='22px'
-              py='18px'>
-              <Text color={textColor} fontSize='xl' fontWeight='600'>
-                History
-              </Text>
-              <Button variant='action'>See all</Button>
             </Flex>
 
-            <HistoryItem
-              name='Colorful Heaven'
-              author='By Mark Benjamin'
-              date='30s ago'
-              image={Nft5}
-              price='0.91 ETH'
-            />
-            <HistoryItem
-              name='Abstract Colors'
-              author='By Esthera Jackson'
-              date='58s ago'
-              image={Nft1}
-              price='0.91 ETH'
-            />
-            <HistoryItem
-              name='ETH AI Brain'
-              author='By Nick Wilson'
-              date='1m ago'
-              image={Nft2}
-              price='0.91 ETH'
-            />
-            <HistoryItem
-              name='Swipe Circles'
-              author='By Peter Will'
-              date='1m ago'
-              image={Nft4}
-              price='0.91 ETH'
-            />
-            <HistoryItem
-              name='Mesh Gradients '
-              author='By Will Smith'
-              date='2m ago'
-              image={Nft3}
-              price='0.91 ETH'
-            />
-            <HistoryItem
-              name='3D Cubes Art'
-              author='By Manny Gates'
-              date='3m ago'
-              image={Nft6}
-              price='0.91 ETH'
-            />
-          </Card>
+            <Flex direction="column">
+              <FormLabel htmlFor="location" color={formLabelColor}>
+                Location
+              </FormLabel>
+              <Input
+                id="location"
+                name="location"
+                value={eventDetails.location}
+                onChange={handleInputChange}
+                mb="20px"
+                placeholder="Enter event location"
+                bg={inputBgColor}
+                borderColor={inputBorderColor}
+              />
+            </Flex>
+          </SimpleGrid>
+
+          <FormLabel htmlFor="description" color={formLabelColor}>
+            Description
+          </FormLabel>
+          <Textarea
+            id="description"
+            name="description"
+            value={eventDetails.description}
+            onChange={handleInputChange}
+            mb="20px"
+            placeholder="Enter event description"
+            bg={inputBgColor}
+            borderColor={inputBorderColor}
+          />
+
+          <SimpleGrid columns={{ base: 1, md: 2 }} spacing={5}>
+            <Flex direction="column">
+              <FormLabel htmlFor="time" color={formLabelColor}>
+                Time
+              </FormLabel>
+              <Input
+                type="time"
+                id="time"
+                name="time"
+                value={eventDetails.time}
+                onChange={handleInputChange}
+                mb="20px"
+                bg={inputBgColor}
+                borderColor={inputBorderColor}
+              />
+            </Flex>
+
+            <Flex direction="column">
+              <FormLabel htmlFor="date" color={formLabelColor}>
+                Date
+              </FormLabel>
+              <Input
+                type="date"
+                id="date"
+                name="date"
+                value={eventDetails.date}
+                onChange={handleInputChange}
+                mb="20px"
+                bg={inputBgColor}
+                borderColor={inputBorderColor}
+              />
+            </Flex>
+          </SimpleGrid>
+
+          {/* Ticket Categories */}
+          {eventDetails.tickets.map((ticket, index) => (
+            <SimpleGrid columns={{ base: 1 }} spacing={5} key={index}>
+              <Flex direction="column">
+                <FormLabel htmlFor={`ticketCategory-${index}`} color={formLabelColor}>
+                  {ticket.category} Ticket Price
+                </FormLabel>
+                <Input
+                  id={`ticketCategory-${index}`}
+                  name="price"
+                  value={ticket.price}
+                  onChange={(e) => handleTicketChange(index, e)}
+                  mb="20px"
+                  placeholder={`Enter ${ticket.category} ticket price`}
+                  bg={inputBgColor}
+                  borderColor={inputBorderColor}
+                />
+              </Flex>
+            </SimpleGrid>
+          ))}
+
+          {/* Event Category Dropdown */}
+          <FormLabel htmlFor="category" color={formLabelColor}>
+            Event Category
+          </FormLabel>
+          <Select
+            id="category"
+            name="category"
+            value={eventDetails.category}
+            onChange={handleInputChange}
+            mb="20px"
+            bg={inputBgColor}
+            borderColor={inputBorderColor}
+          >
+            <option value="">Select Event Category</option>
+            <option value="Music">Music</option>
+            <option value="Sports">Sports</option>
+            <option value="Tech">Tech</option>
+            <option value="Comedy">Comedy</option>
+            <option value="Business">Business</option>
+          </Select>
+
+          {/* Submit Button */}
+          <Button
+            colorScheme="teal"
+            size="sm"
+            onClick={handleSubmit}
+            mt="20px"
+            boxShadow={boxShadow}
+            isLoading={loading} // Show loading spinner when uploading
+          >
+            Post Event
+          </Button>
+
+          {loading && <Text mt="20px">Uploading Image: {Math.round(progress)}%</Text>}
         </Flex>
       </Grid>
-      {/* Delete Product */}
     </Box>
   );
 }
